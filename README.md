@@ -524,12 +524,3 @@ fallback behavior.
 chmod 600 .env
 ```
 
-## Documentation
-
-Additional project records:
-
-- [Migration analysis](MIGRATION_ANALYSIS.md)
-- [Original architecture](ORIGINAL_PROJECT_ARCHITECTURE.md)
-- [Parity checklist](FEATURE_PARITY_CHECKLIST.md)
-- [Handoff](COPILOT_HANDOFF.md)
-- [Continuation prompt](COPILOT_CONTINUATION_PROMPT.md)
