@@ -2,6 +2,8 @@ package com.noginx.ml;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.*;
 import java.util.*;
@@ -237,7 +239,7 @@ public class IsolationForest implements Serializable {
      * where H(i) = ln(i) + 0.5772156649 (Euler-Mascheroni constant)
      */
     private static double cFactor(int n) {
-        if (n <= 1) return 1.0;
+        if (n <= 1) return 0.0;
         if (n == 2) return 1.0;
         double h = Math.log(n - 1) + 0.5772156649;  // Harmonic number approximation
         return 2.0 * h - 2.0 * (n - 1.0) / n;
@@ -290,11 +292,54 @@ public class IsolationForest implements Serializable {
      * @return loaded IsolationForest
      */
     public static IsolationForest load(String modelPath) throws IOException, ClassNotFoundException {
+        if (modelPath.toLowerCase(Locale.ROOT).endsWith(".json")) {
+            return loadSklearnJson(modelPath);
+        }
         try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(modelPath))) {
             IsolationForest model = (IsolationForest) ois.readObject();
             log.info("Model loaded from: {}", modelPath);
             return model;
         }
+    }
+
+    /**
+     * Load a fitted scikit-learn IsolationForest exported to Java-readable JSON.
+     * The JSON contains each fitted ExtraTree node, split, feature, and leaf size.
+     */
+    public static IsolationForest loadSklearnJson(String modelPath) throws IOException {
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode root = mapper.readTree(new File(modelPath));
+        int nEstimators = root.path("n_estimators").asInt();
+        int maxSamples = root.path("max_samples").asInt(256);
+        int nFeatures = root.path("n_features").asInt();
+        double offset = root.path("offset").asDouble(-0.5);
+
+        IsolationForest model = new IsolationForest(nEstimators, maxSamples, 42L, Double.NaN);
+        model.nSamples = maxSamples;
+        model.nFeatures = nFeatures;
+        model.threshold = offset;
+        model.trees = new ArrayList<>(nEstimators);
+
+        JsonNode trees = root.path("trees");
+        JsonNode estimatorsFeatures = root.path("estimators_features");
+        for (int i = 0; i < trees.size(); i++) {
+            JsonNode treeNode = trees.get(i);
+            int[] featureMap = new int[nFeatures];
+            if (estimatorsFeatures != null && i < estimatorsFeatures.size()) {
+                JsonNode mapNode = estimatorsFeatures.get(i);
+                for (int j = 0; j < mapNode.size(); j++) {
+                    featureMap[j] = mapNode.get(j).asInt();
+                }
+            } else {
+                for (int j = 0; j < nFeatures; j++) {
+                    featureMap[j] = j;
+                }
+            }
+            model.trees.add(IsolationTree.fromSklearn(treeNode, featureMap));
+        }
+
+        log.info("Loaded fitted scikit-learn IsolationForest JSON from: {}", modelPath);
+        return model;
     }
 
     // ===================================================================
@@ -321,6 +366,53 @@ public class IsolationForest implements Serializable {
 
         public void fit(double[][] data) {
             root = buildTree(data, 0);
+        }
+
+        private IsolationTree(int maxDepth, Node fittedRoot) {
+            this.maxDepth = maxDepth;
+            this.random = null;
+            this.root = fittedRoot;
+        }
+
+        public static IsolationTree fromSklearn(JsonNode treeNode, int[] featureMap) {
+            JsonNode leftNodes = treeNode.path("children_left");
+            JsonNode rightNodes = treeNode.path("children_right");
+            JsonNode features = treeNode.path("feature");
+            JsonNode thresholds = treeNode.path("threshold");
+            JsonNode nodeSamples = treeNode.path("n_node_samples");
+
+            Node root = buildSklearnNode(
+                    0, leftNodes, rightNodes, features, thresholds, nodeSamples, featureMap);
+            return new IsolationTree(64, root);
+        }
+
+        private static Node buildSklearnNode(
+                int nodeIndex,
+                JsonNode leftNodes,
+                JsonNode rightNodes,
+                JsonNode features,
+                JsonNode thresholds,
+                JsonNode nodeSamples,
+                int[] featureMap) {
+            int leftIndex = leftNodes.get(nodeIndex).asInt();
+            int rightIndex = rightNodes.get(nodeIndex).asInt();
+            int sampleCount = nodeSamples.get(nodeIndex).asInt();
+
+            if (leftIndex == -1 && rightIndex == -1) {
+                return new Node(sampleCount);
+            }
+
+            int relativeFeature = features.get(nodeIndex).asInt();
+            int featureIndex = relativeFeature >= 0 && relativeFeature < featureMap.length
+                    ? featureMap[relativeFeature]
+                    : relativeFeature;
+            double threshold = thresholds.get(nodeIndex).asDouble();
+            Node node = new Node(featureIndex, threshold);
+            node.left = buildSklearnNode(
+                    leftIndex, leftNodes, rightNodes, features, thresholds, nodeSamples, featureMap);
+            node.right = buildSklearnNode(
+                    rightIndex, leftNodes, rightNodes, features, thresholds, nodeSamples, featureMap);
+            return node;
         }
 
         private Node buildTree(double[][] data, int depth) {
@@ -393,7 +485,7 @@ public class IsolationForest implements Serializable {
 
         // Reuse the cFactor from the outer class
         private static double cFactor(int n) {
-            if (n <= 1) return 1.0;
+            if (n <= 1) return 0.0;
             if (n == 2) return 1.0;
             double h = Math.log(n - 1) + 0.5772156649;
             return 2.0 * h - 2.0 * (n - 1.0) / n;

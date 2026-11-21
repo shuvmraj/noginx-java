@@ -7,6 +7,7 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -21,19 +22,40 @@ public class PredictionService {
     private static final Logger log = LoggerFactory.getLogger(PredictionService.class);
 
     private final String modelPath;
+    private final String sklearnModelJsonPath;
     private final String featuresPath;
     private volatile IsolationForest model;
 
+    @Autowired
     public PredictionService(
             @Value("${noginx.model-path:${user.dir}/data/model.ser}") String modelPath,
+            @Value("${noginx.model-json-path:${user.dir}/data/model.json}") String sklearnModelJsonPath,
             @Value("${noginx.features-path:${user.dir}/data/features.csv}") String featuresPath) {
         this.modelPath = modelPath;
+        this.sklearnModelJsonPath = sklearnModelJsonPath;
         this.featuresPath = featuresPath;
+    }
+
+    public PredictionService(String modelPath, String featuresPath) {
+        this(modelPath, Path.of(modelPath).resolveSibling("model.json").toString(), featuresPath);
     }
 
     @PostConstruct
     public void initialize() {
         Path serializedModel = Path.of(modelPath);
+        Path sklearnModelJson = Path.of(sklearnModelJsonPath);
+
+        if (Files.isRegularFile(sklearnModelJson)) {
+            try {
+                model = IsolationForest.load(sklearnModelJson.toString());
+                log.info("Loaded fitted scikit-learn model structure from {}", sklearnModelJson);
+                return;
+            } catch (IOException | ClassNotFoundException e) {
+                throw new IllegalStateException(
+                        "Unable to load fitted scikit-learn model JSON '" + sklearnModelJson
+                                + "': " + e.getMessage(), e);
+            }
+        }
 
         if (Files.isRegularFile(serializedModel)) {
             try {

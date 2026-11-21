@@ -451,14 +451,15 @@ Run:
 mvn clean test
 ```
 
-Current verification: 23 tests pass with 0 failures and 0 errors.
+Current verification: 25 tests pass with 0 failures and 0 errors.
 
-## Machine-learning limitation
+## Machine-learning model
 
-The Java application does not load the original Python `.pkl` file directly.
-It uses a custom Java Isolation Forest trained from `data/features.csv`.
+The Java application prefers `data/model.json`, an export of the fitted
+scikit-learn trees from the original `data/model.pkl`. It does not load Python
+pickle data directly.
 
-The original scikit-learn model uses:
+The exported original model uses:
 
 - 100 estimators.
 - `max_samples=256`.
@@ -467,15 +468,16 @@ The original scikit-learn model uses:
 - Contamination mode `auto`.
 - Offset `-0.5`.
 
-A measured live comparison found:
+A measured fitted-tree comparison found:
 
-- Python marks `{304,0,1,0,54,8}` normal.
-- Java currently marks the same vector anomalous.
-- Python marks `{200,490,0,0,40,8}` anomalous.
+- Python and Java mark `{304,0,1,0,54,8}` normal.
+- Python and Java mark `{200,490,0,0,40,8}` anomalous.
+- A fixed 100-vector reference dataset has 100 matching classifications.
 
-Consequently, exact numerical parity with the original `.pkl` model is not
-claimed. The REST API, watcher, encodings, and alert workflow are implemented;
-model parity remains an unresolved verification item.
+The JSON fitted-tree route is the verified model-parity route. If
+`data/model.json` is unavailable, Java falls back to `data/model.ser` or trains
+a custom approximation from `data/features.csv`; that retraining route is not
+claimed to have exact sklearn parity.
 
 ## Troubleshooting
 
